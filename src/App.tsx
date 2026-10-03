@@ -57,7 +57,7 @@ function SetupScreen() {
         <div className="workflow-top"><div className="workflow-icon"><Icon size={19} /></div><span>{count}</span></div>
         <h2>{title}</h2><div className="stage-list">{stages.map((stage, i) => <div className="stage" key={stage}><span className={i === 0 ? 'stage-dot current' : 'stage-dot'}>{i === 0 ? <Check size={10} /> : null}</span><span>{stage}</span>{i < stages.length - 1 && <i />}</div>)}</div>
       </article>)}</div>
-      <div className="next-step"><div className="next-icon"><KeyRound size={18} /></div><div><strong>Connect the existing Supabase project</strong><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to a local <code>.env</code>, then provide the current schema types and RLS policies.</p></div><ArrowRight className="next-arrow" size={19} /></div>
+      <div className="next-step"><div className="next-icon"><KeyRound size={18} /></div><div><strong>Connect the existing Supabase project</strong><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> to a local <code>.env</code>, then provide the current schema types and RLS policies.</p></div><ArrowRight className="next-arrow" size={19} /></div>
     </section>
     <footer className="page-footer"><span>SECURE BY DESIGN <ShieldCheck size={14} /></span><span>INDIA · ASIA/KOLKATA</span></footer>
   </main>

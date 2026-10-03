@@ -11,9 +11,9 @@ React + TypeScript + Vite frontend foundation for the existing Outward Courier a
 ## Local setup
 
 1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env` and fill in the Supabase project URL and public anon/publishable key. Never put a service-role key in this frontend.
+2. Copy `.env.example` to `.env` and fill in the Supabase project URL and public publishable key. Never put a service-role key in this frontend.
 3. Obtain the database type map from the existing project, for example with `supabase gen types typescript --project-id <project-id> --schema public > src/types/database.ts`.
 4. Provide the existing schema details for tables, foreign keys, enum types, RLS policies, workflow configuration, and Storage buckets. The app must map its services to those actual names before it can load or mutate FMS data.
 5. Run `npm run dev`.
 
-The current checkout contains no `.env`, Supabase CLI project configuration, generated schema types, SQL migrations, or package install. Workbook-derived field/stage references are in the provided files; they are not a replacement for the live database schema.
+The local `.env` file is ignored by Git. Supabase Auth wiring is present, but there is no Supabase CLI project configuration, generated schema types, or SQL schema export yet. Workbook-derived field/stage references are not a replacement for the live database schema.

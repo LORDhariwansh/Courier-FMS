@@ -214,6 +214,12 @@ function WorkspaceScreen({
 
     const matchedDept = departments.find(d => d.name === formValues.department_name)
 
+    const existingNumbers = workflowRecords.map(r => {
+      const num = Number(r.display_record_number)
+      return isNaN(num) ? 0 : num
+    })
+    const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : (activeTab === 'outward' ? 616 : 927)
+
     const res = await createRecord({
       workflow_id: wfId,
       initial_stage_id: stId,
@@ -222,6 +228,7 @@ function WorkspaceScreen({
       user_id: userId,
       metadata: {
         ...formValues,
+        sheet_record_number: nextNumber,
         workflow_type: activeTab,
         created_at_client: new Date().toISOString(),
       },

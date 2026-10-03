@@ -49,7 +49,7 @@ export function AdvanceStageModal({
       <div className="modal-card">
         <div className="modal-header">
           <div>
-            <h2>Advance Stage: Record #{record.record_number || '1'}</h2>
+            <h2>Advance Stage: Record #{record.display_record_number || record.record_number || '1'}</h2>
             <p>{record.item_description} · {record.courier_agent_name}</p>
           </div>
           <button className="modal-close-btn" onClick={onClose}>

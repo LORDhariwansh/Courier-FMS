@@ -41,6 +41,7 @@ export function RecordsTable({
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase()
       const match =
+        (r.display_record_number?.toString().includes(q) ?? false) ||
         r.record_number.toString().includes(q) ||
         r.recipient_name?.toLowerCase().includes(q) ||
         r.sender_name?.toLowerCase().includes(q) ||
@@ -126,7 +127,7 @@ export function RecordsTable({
                 return (
                   <tr key={r.id}>
                     <td>
-                      <span className="record-num-tag">#{r.record_number || '1'}</span>
+                      <span className="record-num-tag">#{r.display_record_number || r.record_number || '1'}</span>
                     </td>
                     <td>
                       <div className="table-sender">

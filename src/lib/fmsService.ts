@@ -17,6 +17,7 @@ export interface RecordWithDetails extends FMSRecord {
   courier_agent_name?: string
   department_name?: string
   item_description?: string
+  display_record_number?: string | number
 }
 
 export const DEFAULT_WORKFLOWS = [
@@ -140,10 +141,12 @@ export async function getRecords(workflowId?: string): Promise<RecordWithDetails
       const curStage = r.current_stage_id ? stageMap.get(r.current_stage_id) || null : null
       const recordInstances = instances.filter(i => i.record_id === r.id)
 
+      const sheetNum = meta.sheet_record_number ? String(meta.sheet_record_number) : null
       return {
         ...r,
         current_stage: curStage,
         stage_instances: recordInstances,
+        display_record_number: sheetNum || r.record_number || '1',
         recipient_name: (meta.recipient_name as string) || (meta.to_name as string) || 'Recipient',
         sender_name: (meta.sender_name as string) || (meta.from_name as string) || 'Sender',
         tracking_number: (meta.tracking_number as string) || (meta.docket_number as string) || '',

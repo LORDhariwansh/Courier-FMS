@@ -29,7 +29,7 @@ export function RecordDetailsModal({
         <div className="modal-header">
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2>Record #{record.record_number || 1}</h2>
+              <h2>Record #{record.display_record_number || record.record_number || 1}</h2>
               <span className={`status-pill ${record.status}`}>{record.status.toUpperCase()}</span>
             </div>
             <p>{record.item_description}</p>

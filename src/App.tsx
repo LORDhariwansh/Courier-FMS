@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { ArrowRight, Boxes, Check, CircleAlert, KeyRound, LayoutDashboard, PackageCheck, ShieldCheck, Truck } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { hasSupabaseConfig, supabase } from './lib/supabase'
 import {
   advanceRecordStage,
@@ -13,13 +14,13 @@ import {
   getWorkflows,
   seedInitialDatabase,
 } from './lib/fmsService'
-import type { CourierAgent, Department, RecordWithDetails, Workflow, WorkflowStage } from './lib/fmsService'
+import type { CourierAgent, Department, RecordWithDetails, Workflow, WorkflowStage, WorkflowField } from './lib/fmsService'
+import { loadUserPermissions } from './lib/permissions'
 import { Navbar } from './components/Navbar'
 import { StatsCards } from './components/StatsCards'
 import { StagePipeline } from './components/StagePipeline'
 import { RecordsTable } from './components/RecordsTable'
 import { CreateRecordModal } from './components/CreateRecordModal'
-import type { RecordFormValues } from './components/CreateRecordModal'
 import { AdvanceStageModal } from './components/AdvanceStageModal'
 import { RecordDetailsModal } from './components/RecordDetailsModal'
 import { CourierAgentsView } from './components/CourierAgentsView'
@@ -104,9 +105,13 @@ function WorkspaceScreen({
   userId: string
   onSignOut: () => void
 }) {
-  const [activeTab, setActiveTab] = useState<'outward' | 'inward' | 'agents' | 'setup'>('outward')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = (searchParams.get('tab') as 'outward' | 'inward' | 'agents' | 'setup') || 'outward'
+  const setActiveTab = (tab: string) => setSearchParams(prev => { prev.set('tab', tab); return prev })
+  
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [stages, setStages] = useState<WorkflowStage[]>([])
+  const [fields, setFields] = useState<WorkflowField[]>([])
   const [courierAgents, setCourierAgents] = useState<CourierAgent[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [records, setRecords] = useState<RecordWithDetails[]>([])
@@ -122,7 +127,9 @@ function WorkspaceScreen({
   async function loadData() {
     setRefreshing(true)
     try {
-      const [{ workflows: wf, stages: st }, agents, depts, recs] = await Promise.all([
+      await loadUserPermissions(userId)
+      
+      const [{ workflows: wf, stages: st, fields: f }, agents, depts, recs] = await Promise.all([
         getWorkflows(),
         getCourierAgents(),
         getDepartments(),
@@ -131,9 +138,16 @@ function WorkspaceScreen({
 
       setWorkflows(wf)
       setStages(st)
+      setFields(f)
       setCourierAgents(agents)
       setDepartments(depts)
       setRecords(recs)
+
+      const recordId = searchParams.get('record')
+      if (recordId) {
+        const rec = recs.find(r => r.display_record_number?.toString() === recordId || r.id === recordId)
+        if (rec) setDetailsRecord(rec)
+      }
     } finally {
       setRefreshing(false)
     }
@@ -164,18 +178,47 @@ function WorkspaceScreen({
     }
   })
 
-  // Filter records by current workflow type
+  // Compute stage mappings
+  const stageIdToNum = new Map(currentWorkflowStages.map(s => [s.id, s.stage_number]))
+
+  // Filter records by current workflow type and URL parameters
   const workflowRecords = records.filter(r => {
-    if (currentDbWorkflow) return r.workflow_id === currentDbWorkflow.id
-    // Fallback: check metadata type
+    if (currentDbWorkflow && r.workflow_id !== currentDbWorkflow.id) return false
+    
+    // Check URL filters
+    const filterStage = searchParams.get('stage')
+    const filterStatus = searchParams.get('status')
+    const filterDepartment = searchParams.get('department')
+    const filterDeliveryType = searchParams.get('delivery_type')
+    const filterCourier = searchParams.get('courier')
+    const filterSupplier = searchParams.get('supplier')
+
     const meta = (typeof r.metadata === 'object' && r.metadata !== null) ? (r.metadata as Record<string, unknown>) : {}
-    return (meta.workflow_type as string) === activeTab || true
+
+    if (filterStage) {
+      const stg = stageInfoList.find(s => s.name.toLowerCase().replace(/ /g, '_') === filterStage || s.name === filterStage || s.number.toString() === filterStage)
+      const currentStageNum = r.current_stage_id ? stageIdToNum.get(r.current_stage_id) || 1 : 1
+      if (!stg || currentStageNum !== stg.number) return false
+    }
+
+    if (filterStatus) {
+      // e.g. status=delayed
+      if (filterStatus === 'delayed' && r.status !== 'overdue') return false
+      if (filterStatus === 'pending' && r.status !== 'active') return false
+      if (filterStatus === 'completed' && r.status !== 'completed') return false
+    }
+
+    if (filterDepartment && r.department_name !== filterDepartment && meta.department !== filterDepartment) return false
+    if (filterCourier && r.courier_agent_name !== filterCourier && meta.courier_agent !== filterCourier) return false
+    if (filterSupplier && meta.supplier_name !== filterSupplier && meta.supplier !== filterSupplier) return false
+    if (filterDeliveryType && meta.delivery_type !== filterDeliveryType) return false
+
+    return true
   })
 
   // Compute stage counts
   const stageCounts: Record<number, number> = {}
-  const stageIdToNum = new Map(currentWorkflowStages.map(s => [s.id, s.stage_number]))
-  for (const r of workflowRecords) {
+  for (const r of records.filter(r => currentDbWorkflow ? r.workflow_id === currentDbWorkflow.id : true)) {
     if (r.status === 'completed') continue
     const num = r.current_stage_id ? stageIdToNum.get(r.current_stage_id) || 1 : 1
     stageCounts[num] = (stageCounts[num] || 0) + 1
@@ -188,7 +231,7 @@ function WorkspaceScreen({
   const overdueCount = workflowRecords.filter(r => r.status === 'overdue' || r.status === 'draft').length
 
   // Create record handler
-  async function handleCreateRecord(formValues: RecordFormValues) {
+  async function handleCreateRecord(formValues: Record<string, any>) {
     let wfId = currentDbWorkflow?.id
     let stId = currentWorkflowStages.find(s => s.stage_number === 1)?.id
     let fmsTypeId = currentDbWorkflow?.fms_type_id
@@ -247,7 +290,8 @@ function WorkspaceScreen({
     recordId: string,
     currentStageId: string,
     nextStageId: string | null,
-    notes: string
+    notes: string,
+    stageValues?: Record<string, any>
   ) {
     const res = await advanceRecordStage({
       record_id: recordId,
@@ -255,6 +299,7 @@ function WorkspaceScreen({
       next_stage_id: nextStageId,
       notes,
       user_id: userId,
+      stageValues,
     })
 
     if (!res.success) {
@@ -310,7 +355,10 @@ function WorkspaceScreen({
               workflowTitle={currentWorkflowDef.name}
               onOpenCreate={() => setIsCreateOpen(true)}
               onOpenAdvance={r => setAdvanceRecord(r)}
-              onOpenDetails={r => setDetailsRecord(r)}
+              onOpenDetails={(r) => {
+                setDetailsRecord(r)
+                setSearchParams(prev => { prev.set('record', r.display_record_number?.toString() || r.id); return prev })
+              }}
             />
           </>
         )}
@@ -324,12 +372,16 @@ function WorkspaceScreen({
         onSubmit={handleCreateRecord}
         courierAgents={courierAgents}
         departments={departments}
+        fields={fields.filter(f => f.workflow_id === currentDbWorkflow?.id && f.stage_id === currentWorkflowStages.find(s => s.stage_number === 1)?.id)}
+        workflowId={currentDbWorkflow?.id || ''}
+        stageId={currentWorkflowStages.find(s => s.stage_number === 1)?.id || ''}
       />
 
       {/* Advance Stage Modal */}
       <AdvanceStageModal
         record={advanceRecord}
         stages={currentWorkflowStages}
+        fields={fields.filter(f => f.workflow_id === currentDbWorkflow?.id)}
         isOpen={Boolean(advanceRecord)}
         onClose={() => setAdvanceRecord(null)}
         onAdvance={handleAdvanceStage}
@@ -339,8 +391,14 @@ function WorkspaceScreen({
       <RecordDetailsModal
         record={detailsRecord}
         stages={currentWorkflowStages}
+        fields={fields.filter(f => f.workflow_id === currentDbWorkflow?.id)}
         isOpen={Boolean(detailsRecord)}
-        onClose={() => setDetailsRecord(null)}
+        onClose={() => {
+          setDetailsRecord(null)
+          if (searchParams.has('record')) {
+            setSearchParams(prev => { prev.delete('record'); return prev })
+          }
+        }}
       />
     </div>
   )

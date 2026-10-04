@@ -5,6 +5,7 @@ export type FMSRecord = Database['public']['Tables']['fms_records']['Row']
 export type FMSStageInstance = Database['public']['Tables']['fms_stage_instances']['Row']
 export type Workflow = Database['public']['Tables']['workflows']['Row']
 export type WorkflowStage = Database['public']['Tables']['workflow_stages']['Row']
+export type WorkflowField = Database['public']['Tables']['workflow_fields']['Row']
 export type CourierAgent = Database['public']['Tables']['courier_agents']['Row']
 export type Department = Database['public']['Tables']['departments']['Row']
 
@@ -64,21 +65,22 @@ export const DEFAULT_DEPARTMENTS = [
 ]
 
 // Fetch all workflows from DB or fallback to defaults
-export async function getWorkflows(): Promise<{ workflows: Workflow[]; stages: WorkflowStage[] }> {
-  if (!supabase) return { workflows: [], stages: [] }
+export async function getWorkflows(): Promise<{ workflows: Workflow[]; stages: WorkflowStage[]; fields: WorkflowField[] }> {
+  if (!supabase) return { workflows: [], stages: [], fields: [] }
 
   try {
     const { data: wfData, error: wfError } = await supabase.from('workflows').select('*').order('name')
     const { data: stData } = await supabase.from('workflow_stages').select('*').order('stage_number')
+    const { data: fData } = await supabase.from('workflow_fields').select('*').order('display_order')
 
     if (!wfError && wfData && wfData.length > 0) {
-      return { workflows: wfData, stages: stData || [] }
+      return { workflows: wfData, stages: stData || [], fields: fData || [] }
     }
   } catch (e) {
     console.warn('Failed to query workflows from db:', e)
   }
 
-  return { workflows: [], stages: [] }
+  return { workflows: [], stages: [], fields: [] }
 }
 
 // Fetch all courier agents
@@ -223,11 +225,18 @@ export async function advanceRecordStage(params: {
   next_stage_id?: string | null
   notes?: string
   user_id?: string | null
+  stageValues?: Record<string, any>
 }): Promise<{ success: boolean; error?: string }> {
   if (!supabase) return { success: false, error: 'Database not connected' }
 
   try {
     const now = new Date().toISOString()
+    
+    // fetch existing record for metadata merge
+    const { data: currentRec } = await supabase.from('fms_records').select('metadata').eq('id', params.record_id).single()
+    const mergedMetadata = currentRec?.metadata && typeof currentRec.metadata === 'object'
+      ? { ...(currentRec.metadata as Record<string, any>), ...(params.stageValues || {}) }
+      : (params.stageValues || {})
 
     // 1. Mark current stage instance as completed
     await supabase
@@ -248,6 +257,7 @@ export async function advanceRecordStage(params: {
         .update({
           current_stage_id: params.next_stage_id,
           updated_at: now,
+          metadata: mergedMetadata as any,
         })
         .eq('id', params.record_id)
 
@@ -275,6 +285,7 @@ export async function advanceRecordStage(params: {
           status: 'completed',
           completed_at: now,
           updated_at: now,
+          metadata: mergedMetadata as any,
         })
         .eq('id', params.record_id)
 
@@ -404,6 +415,56 @@ export async function seedInitialDatabase(): Promise<{ success: boolean; message
         email: ca.email,
         is_active: true,
       })
+    }
+
+    // 7. Seed Inward Fields
+    if (inwardWfId) {
+      const { data: stData } = await supabase.from('workflow_stages').select('id, stage_number').eq('workflow_id', inwardWfId)
+      const stMap = new Map(stData?.map(s => [s.stage_number, s.id]) || [])
+      
+      const inwardFields = [
+        // Stage 1 Fields
+        { stage_number: 1, field_key: 'docket_number', field_label: 'Docket Number', data_type: 'text', is_required: true, display_order: 1 },
+        { stage_number: 1, field_key: 'dispatch_date', field_label: 'Dispatch Date', data_type: 'date', is_required: true, display_order: 2 },
+        { stage_number: 1, field_key: 'courier_agent', field_label: 'Courier Agent Name', data_type: 'dropdown', is_required: true, display_order: 3 },
+        { stage_number: 1, field_key: 'agent_number', field_label: 'Agent Number', data_type: 'text', is_readonly: true, display_order: 4 },
+        { stage_number: 1, field_key: 'supplier_name', field_label: 'Supplier Name', data_type: 'text', is_required: true, display_order: 5 },
+        { stage_number: 1, field_key: 'from_location', field_label: 'From Location', data_type: 'text', is_required: true, display_order: 6 },
+        { stage_number: 1, field_key: 'material', field_label: 'Material', data_type: 'dropdown', configuration: { options: ['Documents', 'Parts', 'Equipment'] }, display_order: 7 },
+        { stage_number: 1, field_key: 'department', field_label: 'Department', data_type: 'dropdown', display_order: 8 },
+        { stage_number: 1, field_key: 'delivery_type', field_label: 'Delivery Type', data_type: 'dropdown', configuration: { options: ['Standard', 'Express', 'Hand-carry'] }, display_order: 9 },
+        { stage_number: 1, field_key: 'image_upload', field_label: 'Image Upload', data_type: 'image', display_order: 10 },
+        // Stage 2 Fields
+        { stage_number: 2, field_key: 'tracking_planned', field_label: 'Tracking Planned', data_type: 'datetime', is_readonly: true, display_order: 11 },
+        { stage_number: 2, field_key: 'days_elapsed', field_label: 'Days Elapsed', data_type: 'number', is_readonly: true, display_order: 12 },
+        { stage_number: 2, field_key: 'tracking_date', field_label: 'Tracking Date', data_type: 'date', display_order: 13 },
+        { stage_number: 2, field_key: 'tracking_remark', field_label: 'Tracking Remark', data_type: 'textarea', display_order: 14 },
+        { stage_number: 2, field_key: 'receive_by', field_label: 'Receive By', data_type: 'user', display_order: 15 },
+        { stage_number: 2, field_key: 'receive_photo', field_label: 'Upload Photo', data_type: 'image', display_order: 16 },
+        { stage_number: 2, field_key: 'receive_actual', field_label: 'Receive Actual', data_type: 'datetime', is_readonly: true, display_order: 17 },
+        { stage_number: 2, field_key: 'delay_url', field_label: 'Delay URL', data_type: 'text', display_order: 18 },
+        // Stage 3 Fields
+        { stage_number: 3, field_key: 'handover_planned', field_label: 'Handover Planned', data_type: 'datetime', is_readonly: true, display_order: 19 },
+        { stage_number: 3, field_key: 'handover_to', field_label: 'Handover To', data_type: 'user', display_order: 20 },
+        { stage_number: 3, field_key: 'handover_actual', field_label: 'Handover Actual', data_type: 'datetime', is_readonly: true, display_order: 21 },
+        { stage_number: 3, field_key: 'archive_data', field_label: 'Archive Data', data_type: 'boolean', is_hidden: true, display_order: 22 },
+        { stage_number: 3, field_key: 'send_trigger', field_label: 'Send Trigger', data_type: 'boolean', is_hidden: true, display_order: 23 },
+      ]
+
+      for (const f of inwardFields) {
+         await supabase.from('workflow_fields').insert({
+            workflow_id: inwardWfId,
+            stage_id: stMap.get(f.stage_number) || null,
+            field_key: f.field_key,
+            field_label: f.field_label,
+            data_type: f.data_type as any,
+            is_required: f.is_required || false,
+            is_readonly: f.is_readonly || false,
+            is_hidden: f.is_hidden || false,
+            display_order: f.display_order,
+            configuration: f.configuration || {},
+         })
+      }
     }
 
     return { success: true, message: 'Workflows, stages, departments, and courier partners initialized successfully!' }

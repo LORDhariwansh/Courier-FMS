@@ -1,24 +1,36 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowRight, CheckCircle, X } from 'lucide-react'
-import type { RecordWithDetails, WorkflowStage } from '../lib/fmsService'
+import type { RecordWithDetails, WorkflowStage, WorkflowField } from '../lib/fmsService'
+import { canEditField, canViewField } from '../lib/permissions'
 
 interface AdvanceStageModalProps {
   record: RecordWithDetails | null
   stages: WorkflowStage[]
+  fields: WorkflowField[]
   isOpen: boolean
   onClose: () => void
-  onAdvance: (recordId: string, currentStageId: string, nextStageId: string | null, notes: string) => Promise<void>
+  onAdvance: (recordId: string, currentStageId: string, nextStageId: string | null, notes: string, stageValues: Record<string, any>) => Promise<void>
 }
 
 export function AdvanceStageModal({
   record,
   stages,
+  fields,
   isOpen,
   onClose,
   onAdvance,
 }: AdvanceStageModalProps) {
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState<Record<string, any>>({})
+
+  useEffect(() => {
+    if (isOpen && record) {
+      const meta = (typeof record.metadata === 'object' && record.metadata !== null) ? record.metadata as Record<string, any> : {}
+      setFormData(meta)
+      setNotes('')
+    }
+  }, [isOpen, record])
 
   if (!isOpen || !record) return null
 
@@ -32,12 +44,17 @@ export function AdvanceStageModal({
 
   const isFinalStage = !nextStage
 
-  async function handleConfirm() {
-    if (!record || !record.current_stage_id) return
+  // Filter fields for current stage
+  const currentStageFields = currentStage ? fields.filter(f => f.stage_id === currentStage.id) : []
+  const visibleFields = currentStageFields.filter(f => !f.is_hidden && canViewField(record.workflow_id, currentStage?.id || '', f.id))
+  visibleFields.sort((a, b) => a.display_order - b.display_order)
+
+  async function handleConfirm(e: React.FormEvent) {
+    e.preventDefault()
+    if (!currentStage) return
     setLoading(true)
     try {
-      await onAdvance(record.id, record.current_stage_id, nextStage ? nextStage.id : null, notes)
-      setNotes('')
+      await onAdvance(record!.id, currentStage.id, nextStage?.id || null, notes, formData)
       onClose()
     } finally {
       setLoading(false)
@@ -49,60 +66,134 @@ export function AdvanceStageModal({
       <div className="modal-card">
         <div className="modal-header">
           <div>
-            <h2>Advance Stage: Record #{record.display_record_number || record.record_number || '1'}</h2>
-            <p>{record.item_description} · {record.courier_agent_name}</p>
+            <h2>Complete Stage {currentStage?.stage_number}: {currentStage?.stage_name}</h2>
+            <p>
+              Update record details and transition to {nextStage ? `Stage ${nextStage.stage_number}: ${nextStage.stage_name}` : 'Completion'}
+            </p>
           </div>
           <button className="modal-close-btn" onClick={onClose}>
             <X size={20} />
           </button>
         </div>
 
-        <div className="stage-transition-card">
-          <div className="transition-step from">
-            <span className="step-label">Current Stage</span>
-            <strong>{currentStage ? `${currentStage.stage_number}. ${currentStage.stage_name}` : 'Initial Stage'}</strong>
-            <small>Status: Active</small>
+        <form onSubmit={handleConfirm} className="modal-form">
+          {visibleFields.length > 0 && (
+            <div className="stage-fields-section" style={{ paddingBottom: '16px', borderBottom: '1px solid #eee', marginBottom: '16px' }}>
+              <h4 style={{ marginBottom: '12px', fontSize: '14px', color: '#555' }}>Stage Requirements</h4>
+              {visibleFields.map(field => {
+                const editable = !field.is_readonly && canEditField(record!.workflow_id, currentStage!.id, field.id)
+                let inputControl = null
+                
+                if (field.data_type === 'textarea') {
+                  inputControl = (
+                    <textarea
+                      rows={2}
+                      required={field.is_required}
+                      disabled={!editable}
+                      value={formData[field.field_key] || ''}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                    />
+                  )
+                } else if (field.data_type === 'date') {
+                  inputControl = (
+                    <input
+                      type="date"
+                      required={field.is_required}
+                      disabled={!editable}
+                      value={formData[field.field_key] || ''}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                    />
+                  )
+                } else if (field.data_type === 'boolean') {
+                  inputControl = (
+                    <input
+                      type="checkbox"
+                      required={field.is_required}
+                      disabled={!editable}
+                      checked={!!formData[field.field_key]}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.checked })}
+                    />
+                  )
+                } else if (field.data_type === 'image' || field.data_type === 'file') {
+                   // A real app would use a file input + upload to Supabase Storage.
+                   // Here we just use a text field to simulate URL linking, or fallback to file type
+                   inputControl = (
+                    <input
+                      type="text"
+                      placeholder="Enter file URL or use attachment..."
+                      required={field.is_required}
+                      disabled={!editable}
+                      value={formData[field.field_key] || ''}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                    />
+                   )
+                } else if (field.data_type === 'dropdown') {
+                  const options = field.configuration && typeof field.configuration === 'object' && 'options' in field.configuration 
+                                  ? (field.configuration as any).options as string[] : []
+                  inputControl = (
+                    <select
+                      required={field.is_required}
+                      disabled={!editable}
+                      value={formData[field.field_key] || ''}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                    >
+                      <option value="">Select...</option>
+                      {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  )
+                } else {
+                  inputControl = (
+                    <input
+                      type="text"
+                      required={field.is_required}
+                      disabled={!editable}
+                      value={formData[field.field_key] || ''}
+                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                    />
+                  )
+                }
+
+                return (
+                  <div className="form-group" key={field.id}>
+                    <label>{field.field_label} {field.is_required && '*'}</label>
+                    {inputControl}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Transition Notes / Handoff Memo</label>
+            <textarea
+              rows={3}
+              placeholder="e.g., Package inspected and transferred to delivery queue."
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+            />
           </div>
 
-          <div className="transition-arrow">
-            <ArrowRight size={20} />
+          <div className="modal-actions" style={{ marginTop: 24 }}>
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={loading}>
+              Cancel
+            </button>
+            <button type="submit" className={`btn-primary ${isFinalStage ? 'btn-success' : ''}`} disabled={loading}>
+              {loading ? (
+                <span>Processing...</span>
+              ) : isFinalStage ? (
+                <>
+                  <CheckCircle size={16} />
+                  <span>Complete Workflow</span>
+                </>
+              ) : (
+                <>
+                  <span>Advance to Stage {nextStage.stage_number}</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
           </div>
-
-          <div className="transition-step to">
-            <span className="step-label">{isFinalStage ? 'Outcome' : 'Target Next Stage'}</span>
-            <strong>{nextStage ? `${nextStage.stage_number}. ${nextStage.stage_name}` : 'Completed / Delivered'}</strong>
-            <small>{isFinalStage ? 'Final stage sign-off' : `TAT: ${nextStage?.tat_hours || 24} hours`}</small>
-          </div>
-        </div>
-
-        <div className="form-group" style={{ marginTop: '16px' }}>
-          <label>Stage Completion Notes / Action Summary</label>
-          <textarea
-            rows={3}
-            placeholder={
-              isFinalStage
-                ? 'e.g., Package received and acknowledged by recipient with digital sign.'
-                : 'e.g., Manifest verified and handed over to logistics partner.'
-            }
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-          />
-        </div>
-
-        <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handleConfirm}
-            disabled={loading}
-          >
-            {isFinalStage ? <CheckCircle size={16} /> : <ArrowRight size={16} />}
-            <span>{loading ? 'Advancing…' : isFinalStage ? 'Complete Workflow' : 'Confirm & Move to Next Stage'}</span>
-          </button>
-        </div>
+        </form>
       </div>
     </div>
   )

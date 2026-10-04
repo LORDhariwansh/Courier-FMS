@@ -1,9 +1,11 @@
-import { Check, Clock, Truck, User, X } from 'lucide-react'
-import type { RecordWithDetails, WorkflowStage } from '../lib/fmsService'
+import { Check, Clock, X } from 'lucide-react'
+import type { RecordWithDetails, WorkflowStage, WorkflowField } from '../lib/fmsService'
+import { canViewField } from '../lib/permissions'
 
 interface RecordDetailsModalProps {
   record: RecordWithDetails | null
   stages: WorkflowStage[]
+  fields: WorkflowField[]
   isOpen: boolean
   onClose: () => void
 }
@@ -11,6 +13,7 @@ interface RecordDetailsModalProps {
 export function RecordDetailsModal({
   record,
   stages,
+  fields,
   isOpen,
   onClose,
 }: RecordDetailsModalProps) {
@@ -22,6 +25,10 @@ export function RecordDetailsModal({
   const meta = (typeof record.metadata === 'object' && record.metadata !== null)
     ? (record.metadata as Record<string, unknown>)
     : {}
+
+  // Filter fields this user can view
+  const visibleFields = fields.filter(f => !f.is_hidden && canViewField(record.workflow_id, f.stage_id || '', f.id))
+  visibleFields.sort((a, b) => a.display_order - b.display_order)
 
   return (
     <div className="modal-backdrop">
@@ -39,42 +46,36 @@ export function RecordDetailsModal({
           </button>
         </div>
 
-        <div className="details-grid">
-          <div className="details-section">
-            <h4><User size={15} /> Personnel & Location</h4>
-            <div className="detail-row">
-              <span className="label">Sender / Dept:</span>
-              <span className="value">{record.sender_name} ({record.department_name})</span>
-            </div>
-            <div className="detail-row">
-              <span className="label">Recipient:</span>
-              <span className="value">{record.recipient_name}</span>
-            </div>
-            {Boolean(meta.recipient_address) && (
+        <div className="details-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+          {visibleFields.length > 0 ? (
+            visibleFields.map(field => {
+              const val = meta[field.field_key]
+              if (val === undefined || val === null || val === '') return null
+              return (
+                <div className="detail-row" key={field.id}>
+                  <span className="label" style={{ fontWeight: 'bold' }}>{field.field_label}:</span>
+                  <span className="value">
+                    {field.data_type === 'image' || field.data_type === 'file' 
+                      ? <a href={String(val)} target="_blank" rel="noreferrer" style={{color: 'blue'}}>View {field.data_type}</a>
+                      : String(val)}
+                  </span>
+                </div>
+              )
+            })
+          ) : (
+            <div className="details-section">
+              <h4>Basic Info</h4>
+              <p className="text-sm text-gray-500">Using fallback layout (no fields configured or access denied).</p>
               <div className="detail-row">
-                <span className="label">Destination:</span>
-                <span className="value">{String(meta.recipient_address)}</span>
+                <span className="label">Sender:</span>
+                <span className="value">{record.sender_name}</span>
               </div>
-            )}
-          </div>
-
-          <div className="details-section">
-            <h4><Truck size={15} /> Courier Logistics</h4>
-            <div className="detail-row">
-              <span className="label">Carrier:</span>
-              <span className="value">{record.courier_agent_name}</span>
-            </div>
-            <div className="detail-row">
-              <span className="label">Tracking / Docket:</span>
-              <span className="value font-mono">{record.tracking_number || 'Awaiting assignment'}</span>
-            </div>
-            {Boolean(meta.package_weight) && (
               <div className="detail-row">
-                <span className="label">Weight / Units:</span>
-                <span className="value">{String(meta.package_weight)}</span>
+                <span className="label">Recipient:</span>
+                <span className="value">{record.recipient_name}</span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="timeline-section">
@@ -101,12 +102,6 @@ export function RecordDetailsModal({
               )
             })}
           </div>
-        </div>
-
-        <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            Close
-          </button>
         </div>
       </div>
     </div>

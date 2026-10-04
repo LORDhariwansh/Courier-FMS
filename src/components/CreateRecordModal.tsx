@@ -1,26 +1,18 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, X } from 'lucide-react'
-import type { CourierAgent, Department } from '../lib/fmsService'
+import type { CourierAgent, Department, WorkflowField } from '../lib/fmsService'
+import { canEditField, canViewField } from '../lib/permissions'
 
 interface CreateRecordModalProps {
   workflowType: 'outward' | 'inward'
   isOpen: boolean
   onClose: () => void
-  onSubmit: (formData: RecordFormValues) => Promise<void>
+  onSubmit: (formData: Record<string, any>) => Promise<void>
   courierAgents: CourierAgent[]
   departments: Department[]
-}
-
-export interface RecordFormValues {
-  sender_name: string
-  recipient_name: string
-  recipient_address: string
-  department_name: string
-  courier_agent_name: string
-  tracking_number: string
-  item_description: string
-  package_weight: string
-  notes: string
+  fields: WorkflowField[]
+  workflowId: string
+  stageId: string
 }
 
 export function CreateRecordModal({
@@ -30,19 +22,31 @@ export function CreateRecordModal({
   onSubmit,
   courierAgents,
   departments,
+  fields,
+  workflowId,
+  stageId
 }: CreateRecordModalProps) {
   const [loading, setLoading] = useState(false)
-  const [formData, setFormData] = useState<RecordFormValues>({
-    sender_name: '',
-    recipient_name: '',
-    recipient_address: '',
-    department_name: departments[0]?.name || 'Operations',
-    courier_agent_name: courierAgents[0]?.name || 'Blue Dart Express',
-    tracking_number: '',
-    item_description: 'Legal & Business Documents',
-    package_weight: '0.5 kg',
-    notes: '',
-  })
+  const [formData, setFormData] = useState<Record<string, any>>({})
+
+  useEffect(() => {
+    if (isOpen) {
+      // Initialize with defaults from fields
+      const initial: Record<string, any> = {}
+      fields.forEach(f => {
+        if (f.default_value !== null) {
+          initial[f.field_key] = f.default_value
+        } else {
+          initial[f.field_key] = ''
+        }
+      })
+      // Set sensible defaults if available
+      if (departments.length > 0 && !initial.department_name) initial.department_name = departments[0].name
+      if (courierAgents.length > 0 && !initial.courier_agent_name) initial.courier_agent_name = courierAgents[0].name
+      
+      setFormData(initial)
+    }
+  }, [isOpen, fields, departments, courierAgents])
 
   if (!isOpen) return null
 
@@ -58,6 +62,12 @@ export function CreateRecordModal({
       setLoading(false)
     }
   }
+
+  // Filter fields by permission
+  const visibleFields = fields.filter(f => !f.is_hidden && canViewField(workflowId, stageId, f.id))
+  
+  // Sort by display_order
+  visibleFields.sort((a, b) => a.display_order - b.display_order)
 
   return (
     <div className="modal-backdrop">
@@ -77,133 +87,79 @@ export function CreateRecordModal({
         </div>
 
         <form onSubmit={handleSubmit} className="modal-form">
-          <div className="form-row">
-            <div className="form-group">
-              <label>{isOutward ? 'Sender / Originator *' : 'Sender / Vendor *'}</label>
-              <input
-                type="text"
-                required
-                placeholder={isOutward ? 'e.g., Harivansh (Finance)' : 'e.g., ABC Suppliers Ltd.'}
-                value={formData.sender_name}
-                onChange={e => setFormData({ ...formData, sender_name: e.target.value })}
-              />
-            </div>
+          {visibleFields.length === 0 ? (
+            <p className="text-sm text-gray-500">No fields configured or permission denied.</p>
+          ) : (
+            visibleFields.map(field => {
+              const editable = !field.is_readonly && canEditField(workflowId, stageId, field.id)
+              
+              let inputControl = null
+              
+              if (field.data_type === 'dropdown') {
+                let options: string[] = []
+                if (field.field_key === 'department_name' || field.field_key === 'department') {
+                   options = departments.map(d => d.name)
+                } else if (field.field_key === 'courier_agent_name' || field.field_key === 'courier_agent') {
+                   options = courierAgents.map(a => a.name)
+                } else if (field.configuration && typeof field.configuration === 'object' && 'options' in field.configuration) {
+                   options = (field.configuration as any).options as string[]
+                }
+                
+                inputControl = (
+                  <select
+                    required={field.is_required}
+                    disabled={!editable}
+                    value={formData[field.field_key] || ''}
+                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                  >
+                    <option value="">Select...</option>
+                    {options.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                )
+              } else if (field.data_type === 'textarea') {
+                inputControl = (
+                  <textarea
+                    rows={2}
+                    required={field.is_required}
+                    disabled={!editable}
+                    placeholder={`Enter ${field.field_label}...`}
+                    value={formData[field.field_key] || ''}
+                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                  />
+                )
+              } else if (field.data_type === 'date') {
+                 inputControl = (
+                  <input
+                    type="date"
+                    required={field.is_required}
+                    disabled={!editable}
+                    value={formData[field.field_key] || ''}
+                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                  />
+                 )
+              } else {
+                inputControl = (
+                  <input
+                    type="text"
+                    required={field.is_required}
+                    disabled={!editable}
+                    placeholder={`e.g., ${field.field_label}`}
+                    value={formData[field.field_key] || ''}
+                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
+                  />
+                )
+              }
 
-            <div className="form-group">
-              <label>{isOutward ? 'Recipient Name / Client *' : 'Internal Recipient *'}</label>
-              <input
-                type="text"
-                required
-                placeholder={isOutward ? 'e.g., Tata Motors Logistics' : 'e.g., Accounts Dept'}
-                value={formData.recipient_name}
-                onChange={e => setFormData({ ...formData, recipient_name: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label>Department *</label>
-              <select
-                value={formData.department_name}
-                onChange={e => setFormData({ ...formData, department_name: e.target.value })}
-              >
-                {departments.length > 0 ? (
-                  departments.map(d => (
-                    <option key={d.id} value={d.name}>
-                      {d.name}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="Administration & Facilities">Administration & Facilities</option>
-                    <option value="Finance & Accounts">Finance & Accounts</option>
-                    <option value="Human Resources">Human Resources</option>
-                    <option value="Legal & Compliance">Legal & Compliance</option>
-                    <option value="Operations & Procurement">Operations & Procurement</option>
-                  </>
-                )}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>Courier Carrier / Partner *</label>
-              <select
-                value={formData.courier_agent_name}
-                onChange={e => setFormData({ ...formData, courier_agent_name: e.target.value })}
-              >
-                {courierAgents.length > 0 ? (
-                  courierAgents.map(a => (
-                    <option key={a.id} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="Blue Dart Express">Blue Dart Express</option>
-                    <option value="DTDC Courier">DTDC Courier</option>
-                    <option value="DHL Express">DHL Express</option>
-                    <option value="Delhivery">Delhivery</option>
-                    <option value="India Post (Speed Post)">India Post (Speed Post)</option>
-                    <option value="FedEx India">FedEx India</option>
-                  </>
-                )}
-              </select>
-            </div>
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label>Docket / AWB / Tracking #</label>
-              <input
-                type="text"
-                placeholder="e.g., BD-984729103"
-                value={formData.tracking_number}
-                onChange={e => setFormData({ ...formData, tracking_number: e.target.value })}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Package Weight / Quantity</label>
-              <input
-                type="text"
-                placeholder="e.g., 0.5 kg (1 envelope)"
-                value={formData.package_weight}
-                onChange={e => setFormData({ ...formData, package_weight: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Destination / Delivery Address</label>
-            <input
-              type="text"
-              placeholder="e.g., Unit 402, Trade Tower, Bandra Kurla Complex, Mumbai"
-              value={formData.recipient_address}
-              onChange={e => setFormData({ ...formData, recipient_address: e.target.value })}
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Material / Contents Description *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g., Signed Agreement Deeds & Cheque"
-              value={formData.item_description}
-              onChange={e => setFormData({ ...formData, item_description: e.target.value })}
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Instructions / Dispatch Notes</label>
-            <textarea
-              rows={2}
-              placeholder="e.g., Deliver before 5 PM, urgent priority"
-              value={formData.notes}
-              onChange={e => setFormData({ ...formData, notes: e.target.value })}
-            />
-          </div>
+              return (
+                <div className="form-group" key={field.id}>
+                  <label>{field.field_label} {field.is_required && '*'}</label>
+                  {inputControl}
+                </div>
+              )
+            })
+          )}
 
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={onClose} disabled={loading}>
@@ -211,7 +167,7 @@ export function CreateRecordModal({
             </button>
             <button type="submit" className="btn-primary" disabled={loading}>
               <Plus size={16} />
-              <span>{loading ? 'Creating Record…' : 'Submit Record'}</span>
+              <span>{loading ? 'Creating Record?' : 'Submit Record'}</span>
             </button>
           </div>
         </form>

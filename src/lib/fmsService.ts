@@ -262,7 +262,7 @@ export async function createRecord(params: {
   }
 }
 
-// Advance record to next stage
+// Central Transition Service - securely advance record to next stage
 export async function advanceRecordStage(params: {
   record_id: string
   current_stage_id: string
@@ -285,8 +285,23 @@ export async function advanceRecordStage(params: {
     if (currentRec?.workflow_id) {
        const { data: fields } = await supabase.from('workflow_fields').select('*').eq('workflow_id', currentRec.workflow_id)
        if (fields) {
-         // evaluate dependent and auto-calculated fields over the entire object
+         // evaluate dependent and auto-calculated fields over the entire object securely
          evaluateDependencies(fields, mergedMetadata)
+
+         // SECURE TRANSITION VALIDATION
+         // Dynamically generate completion rules based on required fields for the CURRENT stage
+         const { generateRequiredFieldConditions, evaluateConditions } = await import('./conditions')
+         const currentStageFields = fields.filter(f => f.stage_id === params.current_stage_id)
+         const rules = generateRequiredFieldConditions(currentStageFields)
+         
+         const evaluation = evaluateConditions(mergedMetadata, rules)
+         if (!evaluation.passed) {
+           const missingFields = evaluation.failedRules.map(r => {
+             const fieldConfig = currentStageFields.find(f => f.field_key === r.field_key)
+             return fieldConfig?.field_label || r.field_key
+           }).join(', ')
+           return { success: false, error: `Stage conditions not met. Missing required fields: ${missingFields}` }
+         }
        }
     }
 
@@ -301,6 +316,17 @@ export async function advanceRecordStage(params: {
       })
       .eq('record_id', params.record_id)
       .eq('stage_id', params.current_stage_id)
+
+    // Audit Event: STAGE_COMPLETED using existing history table
+    await supabase.from('fms_stage_history').insert({
+      record_id: params.record_id,
+      stage_id: params.current_stage_id,
+      action: 'STAGE_COMPLETED',
+      old_status: 'active',
+      new_status: 'completed',
+      performed_by: params.user_id || null,
+      notes: params.notes || 'Stage completed automatically',
+    })
 
     // 2. If there is a next stage, activate it
     if (params.next_stage_id) {
@@ -537,7 +563,8 @@ export async function seedInitialDatabase(): Promise<{ success: boolean; message
         { stage_number: 1, field_key: 'contact_person', field_label: 'Contact Person', data_type: 'text', is_readonly: true, display_order: 6, configuration: { execution_type: 'dependent_input', depends_on: { field_key: 'company_name', operator: 'DEPEND' }, source_config: { type: 'dependent', lookup_table: 'customers', return_field: 'contact_person' } } },
       ]
 
-      for (const f of outwardFields) {
+      for (const field of outwardFields) {
+         const f = field as any
          await supabase.from('workflow_fields').insert({
             workflow_id: outwardWfId,
             stage_id: stMap.get(f.stage_number) || null,

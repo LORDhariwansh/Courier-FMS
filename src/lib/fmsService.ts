@@ -118,6 +118,16 @@ export async function getMaterials(): Promise<any[]> {
   return []
 }
 
+// Fetch customers
+export async function getCustomers(): Promise<any[]> {
+  if (!supabase) return []
+  try {
+    const { data, error } = await supabase.from('customers').select('*').order('name')
+    if (!error && data) return data
+  } catch (e) { console.warn('Error fetching customers:', e) }
+  return []
+}
+
 // Fetch users
 export async function getUsers(): Promise<any[]> {
   if (!supabase) return []
@@ -499,6 +509,37 @@ export async function seedInitialDatabase(): Promise<{ success: boolean; message
       for (const f of inwardFields) {
          await supabase.from('workflow_fields').insert({
             workflow_id: inwardWfId,
+            stage_id: stMap.get(f.stage_number) || null,
+            field_key: f.field_key,
+            field_label: f.field_label,
+            data_type: f.data_type as any,
+            is_required: f.is_required || false,
+            is_readonly: f.is_readonly || false,
+            is_hidden: f.is_hidden || false,
+            display_order: f.display_order,
+            configuration: f.configuration || {},
+         })
+      }
+    }
+
+    // 8. Seed Outward Fields
+    if (outwardWfId) {
+      const { data: stData } = await supabase.from('workflow_stages').select('id, stage_number').eq('workflow_id', outwardWfId)
+      const stMap = new Map(stData?.map(s => [s.stage_number, s.id]) || [])
+      
+      const outwardFields = [
+        // Stage 1 Fields
+        { stage_number: 1, field_key: 'timestamp', field_label: 'Timestamp', data_type: 'datetime', is_readonly: true, display_order: 1, configuration: { execution_type: 'system_timestamp', depends_on: { field_key: 'courier_agent', operator: 'NOT_NULL' } } },
+        { stage_number: 1, field_key: 'courier_agent', field_label: 'Courier Agent', data_type: 'dropdown', is_required: true, display_order: 2, configuration: { execution_type: 'user_input', source_config: { type: 'master_data', table: 'courier_agents' } } },
+        { stage_number: 1, field_key: 'requested_by', field_label: 'Requested By', data_type: 'user', is_required: true, display_order: 3, configuration: { execution_type: 'user_input', source_config: { type: 'user' } } },
+        { stage_number: 1, field_key: 'sample_detail', field_label: 'Sample Detail', data_type: 'dropdown', is_required: true, display_order: 4, configuration: { execution_type: 'user_input', source_config: { type: 'static', options: ['Document', 'Package', 'Hardware', 'Other'] } } },
+        { stage_number: 1, field_key: 'company_name', field_label: 'Company Name', data_type: 'dropdown', is_required: true, display_order: 5, configuration: { execution_type: 'user_input', source_config: { type: 'master_data', table: 'customers' } } },
+        { stage_number: 1, field_key: 'contact_person', field_label: 'Contact Person', data_type: 'text', is_readonly: true, display_order: 6, configuration: { execution_type: 'dependent_input', depends_on: { field_key: 'company_name', operator: 'DEPEND' }, source_config: { type: 'dependent', lookup_table: 'customers', return_field: 'contact_person' } } },
+      ]
+
+      for (const f of outwardFields) {
+         await supabase.from('workflow_fields').insert({
+            workflow_id: outwardWfId,
             stage_id: stMap.get(f.stage_number) || null,
             field_key: f.field_key,
             field_label: f.field_label,

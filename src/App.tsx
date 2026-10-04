@@ -130,12 +130,13 @@ function WorkspaceScreen({
     try {
       await loadUserPermissions(userId)
       
-      const [{ workflows: wf, stages: st, fields: f }, agents, depts, materials, users, recs] = await Promise.all([
+      const [{ workflows: wf, stages: st, fields: f }, agents, depts, materials, users, customers, recs] = await Promise.all([
         getWorkflows(),
         getCourierAgents(),
         getDepartments(),
         import('./lib/fmsService').then(m => m.getMaterials()),
         import('./lib/fmsService').then(m => m.getUsers()),
+        import('./lib/fmsService').then(m => m.getCustomers()),
         getRecords(),
       ])
 
@@ -144,7 +145,7 @@ function WorkspaceScreen({
       setFields(f)
       setCourierAgents(agents)
       setDepartments(depts)
-      setMasterData({ courier_agents: agents, departments: depts, materials, users })
+      setMasterData({ courier_agents: agents, departments: depts, materials, users, customers })
       setRecords(recs)
 
       const recordId = searchParams.get('record')

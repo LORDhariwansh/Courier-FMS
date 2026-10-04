@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { ArrowRight, CheckCircle, X } from 'lucide-react'
 import type { RecordWithDetails, WorkflowStage, WorkflowField } from '../lib/fmsService'
 import { canEditField, canViewField } from '../lib/permissions'
+import { DynamicFieldRenderer } from './DynamicFieldRenderer'
+import { evaluateDependencies } from '../lib/fieldBehavior'
 
 interface AdvanceStageModalProps {
   record: RecordWithDetails | null
@@ -10,6 +12,7 @@ interface AdvanceStageModalProps {
   isOpen: boolean
   onClose: () => void
   onAdvance: (recordId: string, currentStageId: string, nextStageId: string | null, notes: string, stageValues: Record<string, any>) => Promise<void>
+  context?: any
 }
 
 export function AdvanceStageModal({
@@ -19,6 +22,7 @@ export function AdvanceStageModal({
   isOpen,
   onClose,
   onAdvance,
+  context
 }: AdvanceStageModalProps) {
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
@@ -82,82 +86,19 @@ export function AdvanceStageModal({
               <h4 style={{ marginBottom: '12px', fontSize: '14px', color: '#555' }}>Stage Requirements</h4>
               {visibleFields.map(field => {
                 const editable = !field.is_readonly && canEditField(record!.workflow_id, currentStage!.id, field.id)
-                let inputControl = null
-                
-                if (field.data_type === 'textarea') {
-                  inputControl = (
-                    <textarea
-                      rows={2}
-                      required={field.is_required}
-                      disabled={!editable}
-                      value={formData[field.field_key] || ''}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                    />
-                  )
-                } else if (field.data_type === 'date') {
-                  inputControl = (
-                    <input
-                      type="date"
-                      required={field.is_required}
-                      disabled={!editable}
-                      value={formData[field.field_key] || ''}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                    />
-                  )
-                } else if (field.data_type === 'boolean') {
-                  inputControl = (
-                    <input
-                      type="checkbox"
-                      required={field.is_required}
-                      disabled={!editable}
-                      checked={!!formData[field.field_key]}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.checked })}
-                    />
-                  )
-                } else if (field.data_type === 'image' || field.data_type === 'file') {
-                   // A real app would use a file input + upload to Supabase Storage.
-                   // Here we just use a text field to simulate URL linking, or fallback to file type
-                   inputControl = (
-                    <input
-                      type="text"
-                      placeholder="Enter file URL or use attachment..."
-                      required={field.is_required}
-                      disabled={!editable}
-                      value={formData[field.field_key] || ''}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                    />
-                   )
-                } else if (field.data_type === 'dropdown') {
-                  const options = field.configuration && typeof field.configuration === 'object' && 'options' in field.configuration 
-                                  ? (field.configuration as any).options as string[] : []
-                  inputControl = (
-                    <select
-                      required={field.is_required}
-                      disabled={!editable}
-                      value={formData[field.field_key] || ''}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                    >
-                      <option value="">Select...</option>
-                      {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                    </select>
-                  )
-                } else {
-                  inputControl = (
-                    <input
-                      type="text"
-                      required={field.is_required}
-                      disabled={!editable}
-                      value={formData[field.field_key] || ''}
-                      onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                    />
-                  )
-                }
-
                 return (
-                  <div className="form-group" key={field.id}>
-                    <label>{field.field_label} {field.is_required && '*'}</label>
-                    {inputControl}
-                  </div>
+                  <DynamicFieldRenderer
+                    key={field.id}
+                    field={field}
+                    value={formData[field.field_key]}
+                    disabled={!editable}
+                    context={context}
+                    onChange={(val) => {
+                      const newFormData = { ...formData, [field.field_key]: val }
+                      evaluateDependencies(fields, newFormData, context)
+                      setFormData(newFormData)
+                    }}
+                  />
                 )
               })}
             </div>

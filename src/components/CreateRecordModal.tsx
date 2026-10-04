@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Plus, X } from 'lucide-react'
 import type { CourierAgent, Department, WorkflowField } from '../lib/fmsService'
 import { canEditField, canViewField } from '../lib/permissions'
+import { DynamicFieldRenderer } from './DynamicFieldRenderer'
+import { evaluateDependencies } from '../lib/fieldBehavior'
 
 interface CreateRecordModalProps {
   workflowType: 'outward' | 'inward'
@@ -13,6 +15,7 @@ interface CreateRecordModalProps {
   fields: WorkflowField[]
   workflowId: string
   stageId: string
+  context?: any
 }
 
 export function CreateRecordModal({
@@ -24,7 +27,8 @@ export function CreateRecordModal({
   departments,
   fields,
   workflowId,
-  stageId
+  stageId,
+  context
 }: CreateRecordModalProps) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState<Record<string, any>>({})
@@ -92,71 +96,20 @@ export function CreateRecordModal({
           ) : (
             visibleFields.map(field => {
               const editable = !field.is_readonly && canEditField(workflowId, stageId, field.id)
-              
-              let inputControl = null
-              
-              if (field.data_type === 'dropdown') {
-                let options: string[] = []
-                if (field.field_key === 'department_name' || field.field_key === 'department') {
-                   options = departments.map(d => d.name)
-                } else if (field.field_key === 'courier_agent_name' || field.field_key === 'courier_agent') {
-                   options = courierAgents.map(a => a.name)
-                } else if (field.configuration && typeof field.configuration === 'object' && 'options' in field.configuration) {
-                   options = (field.configuration as any).options as string[]
-                }
-                
-                inputControl = (
-                  <select
-                    required={field.is_required}
-                    disabled={!editable}
-                    value={formData[field.field_key] || ''}
-                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                  >
-                    <option value="">Select...</option>
-                    {options.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                )
-              } else if (field.data_type === 'textarea') {
-                inputControl = (
-                  <textarea
-                    rows={2}
-                    required={field.is_required}
-                    disabled={!editable}
-                    placeholder={`Enter ${field.field_label}...`}
-                    value={formData[field.field_key] || ''}
-                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                  />
-                )
-              } else if (field.data_type === 'date') {
-                 inputControl = (
-                  <input
-                    type="date"
-                    required={field.is_required}
-                    disabled={!editable}
-                    value={formData[field.field_key] || ''}
-                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                  />
-                 )
-              } else {
-                inputControl = (
-                  <input
-                    type="text"
-                    required={field.is_required}
-                    disabled={!editable}
-                    placeholder={`e.g., ${field.field_label}`}
-                    value={formData[field.field_key] || ''}
-                    onChange={e => setFormData({ ...formData, [field.field_key]: e.target.value })}
-                  />
-                )
-              }
-
               return (
-                <div className="form-group" key={field.id}>
-                  <label>{field.field_label} {field.is_required && '*'}</label>
-                  {inputControl}
-                </div>
+                <DynamicFieldRenderer
+                  key={field.id}
+                  field={field}
+                  value={formData[field.field_key]}
+                  disabled={!editable}
+                  context={context}
+                  onChange={(val) => {
+                    const newFormData = { ...formData, [field.field_key]: val }
+                    // Trigger dependency evaluation
+                    evaluateDependencies(fields, newFormData, context)
+                    setFormData(newFormData)
+                  }}
+                />
               )
             })
           )}
@@ -166,8 +119,14 @@ export function CreateRecordModal({
               Cancel
             </button>
             <button type="submit" className="btn-primary" disabled={loading}>
-              <Plus size={16} />
-              <span>{loading ? 'Creating Record?' : 'Submit Record'}</span>
+              {loading ? (
+                <span>Creating...</span>
+              ) : (
+                <>
+                  <Plus size={16} />
+                  <span>Create {isOutward ? 'Request' : 'Docket'}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

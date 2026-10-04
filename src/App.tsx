@@ -114,6 +114,7 @@ function WorkspaceScreen({
   const [fields, setFields] = useState<WorkflowField[]>([])
   const [courierAgents, setCourierAgents] = useState<CourierAgent[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
+  const [masterData, setMasterData] = useState<Record<string, any[]>>({})
   const [records, setRecords] = useState<RecordWithDetails[]>([])
   const [selectedStage, setSelectedStage] = useState<number | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -129,10 +130,12 @@ function WorkspaceScreen({
     try {
       await loadUserPermissions(userId)
       
-      const [{ workflows: wf, stages: st, fields: f }, agents, depts, recs] = await Promise.all([
+      const [{ workflows: wf, stages: st, fields: f }, agents, depts, materials, users, recs] = await Promise.all([
         getWorkflows(),
         getCourierAgents(),
         getDepartments(),
+        import('./lib/fmsService').then(m => m.getMaterials()),
+        import('./lib/fmsService').then(m => m.getUsers()),
         getRecords(),
       ])
 
@@ -141,6 +144,7 @@ function WorkspaceScreen({
       setFields(f)
       setCourierAgents(agents)
       setDepartments(depts)
+      setMasterData({ courier_agents: agents, departments: depts, materials, users })
       setRecords(recs)
 
       const recordId = searchParams.get('record')
@@ -375,6 +379,7 @@ function WorkspaceScreen({
         fields={fields.filter(f => f.workflow_id === currentDbWorkflow?.id && f.stage_id === currentWorkflowStages.find(s => s.stage_number === 1)?.id)}
         workflowId={currentDbWorkflow?.id || ''}
         stageId={currentWorkflowStages.find(s => s.stage_number === 1)?.id || ''}
+        context={{ masterData }}
       />
 
       {/* Advance Stage Modal */}
@@ -385,6 +390,7 @@ function WorkspaceScreen({
         isOpen={Boolean(advanceRecord)}
         onClose={() => setAdvanceRecord(null)}
         onAdvance={handleAdvanceStage}
+        context={{ masterData }}
       />
 
       {/* Record Details Modal */}

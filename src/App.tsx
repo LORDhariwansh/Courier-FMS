@@ -16,6 +16,7 @@ import {
 } from './lib/fmsService'
 import type { CourierAgent, Department, RecordWithDetails, Workflow, WorkflowStage, WorkflowField } from './lib/fmsService'
 import { loadUserPermissions } from './lib/permissions'
+import { Navbar } from './components/Navbar'
 import { StatsCards } from './components/StatsCards'
 import { StagePipeline } from './components/StagePipeline'
 import { RecordsTable } from './components/RecordsTable'
@@ -29,8 +30,6 @@ const workflowsList = [
   { title: 'Outward Courier', count: '7 stages', icon: Truck, stages: ['Request', 'Assign', 'Prepare', 'Dispatch Planning', 'Pick Up', 'Tracking', 'Acknowledgement'] },
   { title: 'Inward Tracking', count: '3 stages', icon: PackageCheck, stages: ['Docket Received', 'Track Shipment', 'Hand Over Material'] },
 ]
-
-import { EnterpriseLayout } from './components/Layout'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -118,6 +117,7 @@ function WorkspaceScreen({
   const [masterData, setMasterData] = useState<Record<string, any[]>>({})
   const [records, setRecords] = useState<RecordWithDetails[]>([])
   const [selectedStage, setSelectedStage] = useState<number | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -126,6 +126,7 @@ function WorkspaceScreen({
 
   // Load initial workspace data
   async function loadData() {
+    setRefreshing(true)
     try {
       await loadUserPermissions(userId)
       
@@ -152,8 +153,8 @@ function WorkspaceScreen({
         const rec = recs.find(r => r.display_record_number?.toString() === recordId || r.id === recordId)
         if (rec) setDetailsRecord(rec)
       }
-    } catch (err) {
-      console.error(err)
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -315,40 +316,43 @@ function WorkspaceScreen({
   }
 
   return (
-    <EnterpriseLayout
-      activeTab={activeTab}
-      setActiveTab={(tab) => {
-        setActiveTab(tab)
-        setSelectedStage(null)
-      }}
-      userEmail={email}
-      onSignOut={onSignOut}
-      onNewRequest={() => setIsCreateOpen(true)}
-    >
-      {activeTab === 'setup' ? (
-        <SetupView onRefreshAll={loadData} />
-      ) : activeTab === 'agents' ? (
-        <CourierAgentsView agents={courierAgents} onRefresh={loadData} />
-      ) : (
-        <div className="space-y-6 max-w-7xl mx-auto w-full">
-          {/* KPI Summary Cards */}
-          <StatsCards
-            total={totalCount}
-            active={activeCount}
-            completed={completedCount}
-            overdue={overdueCount}
-          />
+    <div className="fms-app-layout">
+      <Navbar
+        activeTab={activeTab}
+        onSelectTab={tab => {
+          setActiveTab(tab)
+          setSelectedStage(null)
+        }}
+        userEmail={email}
+        onSignOut={onSignOut}
+        onRefresh={loadData}
+        refreshing={refreshing}
+      />
 
-          {/* Visual Workflow Pipeline Stepper */}
-          <StagePipeline
-            stages={stageInfoList}
-            selectedStage={selectedStage}
-            onSelectStage={setSelectedStage}
-            stageCounts={stageCounts}
-          />
+      <main className="fms-main-content">
+        {activeTab === 'setup' ? (
+          <SetupView onRefreshAll={loadData} />
+        ) : activeTab === 'agents' ? (
+          <CourierAgentsView agents={courierAgents} onRefresh={loadData} />
+        ) : (
+          <>
+            {/* KPI Summary Cards */}
+            <StatsCards
+              total={totalCount}
+              active={activeCount}
+              completed={completedCount}
+              overdue={overdueCount}
+            />
 
-          {/* Records Data Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Visual Workflow Pipeline Stepper */}
+            <StagePipeline
+              stages={stageInfoList}
+              selectedStage={selectedStage}
+              onSelectStage={setSelectedStage}
+              stageCounts={stageCounts}
+            />
+
+            {/* Records Data Table */}
             <RecordsTable
               records={workflowRecords}
               stages={currentWorkflowStages}
@@ -361,9 +365,9 @@ function WorkspaceScreen({
                 setSearchParams(prev => { prev.set('record', r.display_record_number?.toString() || r.id); return prev })
               }}
             />
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </main>
 
       {/* New Record Modal */}
       <CreateRecordModal
@@ -403,7 +407,7 @@ function WorkspaceScreen({
           }
         }}
       />
-    </EnterpriseLayout>
+    </div>
   )
 }
 
